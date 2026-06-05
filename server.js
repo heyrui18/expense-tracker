@@ -13,7 +13,7 @@ app.use(express.static(path.join(__dirname, 'public')));
 const PORT = process.env.PORT || 3000;
 const SHEET_ID = process.env.GOOGLE_SHEET_ID;
 const SHEET_NAME = 'Expenses';
-const CATEGORIES = ['Food', 'Shopping', 'Entertainment', 'Travel'];
+const CATEGORIES = ['Food', 'Shopping', 'Entertainment', 'Travel', 'Wellness', 'Others'];
 
 // ── Google Sheets auth ──────────────────────────────────────────────────────
 function getAuthClient() {
@@ -61,7 +61,7 @@ async function getAllRows() {
   const sheets = await getSheetsClient();
   const res = await sheets.spreadsheets.values.get({
     spreadsheetId: SHEET_ID,
-    range: `${SHEET_NAME}!A2:D`,
+    range: `${SHEET_NAME}!A2:E`,
   });
   return res.data.values || [];
 }
@@ -112,7 +112,7 @@ app.get('/expenses', async (req, res) => {
 });
 
 app.post('/add-expense', async (req, res) => {
-  const { date, item, category, amount } = req.body;
+  const { date, item, category, amount, notes } = req.body;
   if (!date || !item || !category || amount === undefined) {
     return res.status(400).json({ error: 'Missing fields' });
   }
@@ -123,9 +123,9 @@ app.post('/add-expense', async (req, res) => {
     const sheets = await getSheetsClient();
     await sheets.spreadsheets.values.append({
       spreadsheetId: SHEET_ID,
-      range: `${SHEET_NAME}!A:D`,
+      range: `${SHEET_NAME}!A:E`,
       valueInputOption: 'USER_ENTERED',
-      requestBody: { values: [[date, item, category, parseFloat(amount)]] },
+      requestBody: { values: [[date, item, category, parseFloat(amount), notes || '']] },
     });
     const rows = await getAllRows();
     broadcastSSE(rows);
@@ -214,8 +214,9 @@ async function handleCommand(chatId, text) {
     bot.sendMessage(
       chatId,
       `💰 *Expense Tracker Bot*\n\n` +
-      `*Add expense:*\n\`item, category, amount\`\n` +
-      `e.g. \`Lunch, Food, 12.50\`\n\n` +
+      `*Add expense:*\n\`item, category, amount\`\nor with notes: \`item, category, amount, notes\`\n\n` +
+      `*Examples:*\n\`Lunch, Food, 12.50\`\n\`Gym, Wellness, 80, monthly membership\`\n\n` +
+      `*Categories:*\n${CATEGORIES.map(c => `• ${c}`).join('\n')}\n\n` +
       `*Commands:*\n` +
       `/summary — this month's totals\n` +
       `/last5 — last 5 entries\n` +
@@ -267,8 +268,8 @@ async function handleCommand(chatId, text) {
         return;
       }
       const lines = last.map(
-        ([date, item, cat, amt]) =>
-          `• ${item} | ${cat} | $${parseFloat(amt).toFixed(2)} on ${formatDateForReply(date)}`
+        ([date, item, cat, amt, notes]) =>
+          `• ${item} | ${cat} | $${parseFloat(amt).toFixed(2)} on ${formatDateForReply(date)}${notes ? ` | ${notes}` : ''}`
       );
       bot.sendMessage(chatId, `🕐 *Last 5 Entries*\n\n${lines.join('\n')}`, {
         parse_mode: 'Markdown',
@@ -326,16 +327,16 @@ async function handleCommand(chatId, text) {
 
 async function handleExpenseMessage(chatId, text) {
   const parts = text.split(',').map(s => s.trim());
-  if (parts.length !== 3) {
+  if (parts.length < 3 || parts.length > 4) {
     bot.sendMessage(
       chatId,
-      '❌ Invalid format.\n\nUse: `item, category, amount`\ne.g. `Lunch, Food, 12.50`',
+      '❌ Invalid format.\n\nUse: `item, category, amount` or `item, category, amount, notes`\ne.g. `Lunch, Food, 12.50` or `Lunch, Food, 12.50, team lunch`',
       { parse_mode: 'Markdown' }
     );
     return;
   }
 
-  const [item, rawCat, rawAmt] = parts;
+  const [item, rawCat, rawAmt, notes = ''] = parts;
   const category = CATEGORIES.find(c => c.toLowerCase() === rawCat.toLowerCase());
   if (!category) {
     bot.sendMessage(
@@ -359,16 +360,17 @@ async function handleExpenseMessage(chatId, text) {
     const sheets = await getSheetsClient();
     await sheets.spreadsheets.values.append({
       spreadsheetId: SHEET_ID,
-      range: `${SHEET_NAME}!A:D`,
+      range: `${SHEET_NAME}!A:E`,
       valueInputOption: 'USER_ENTERED',
-      requestBody: { values: [[date, item, category, amount]] },
+      requestBody: { values: [[date, item, category, amount, notes]] },
     });
     const rows = await getAllRows();
     broadcastSSE(rows);
 
+    const notesStr = notes ? ` | 📝 ${notes}` : '';
     bot.sendMessage(
       chatId,
-      `✅ Added: ${item} | ${category} | $${amount.toFixed(2)} on ${formatDateForReply(date)}`
+      `✅ Added: ${item} | ${category} | $${amount.toFixed(2)} on ${formatDateForReply(date)}${notesStr}`
     );
   } catch (err) {
     bot.sendMessage(chatId, `Error saving expense: ${err.message}`);

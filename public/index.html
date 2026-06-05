@@ -22,6 +22,8 @@
       --red: #f87171;
       --blue: #60a5fa;
       --purple: #a78bfa;
+      --pink: #f472b6;
+      --gray: #94a3b8;
       --radius: 14px;
     }
 
@@ -299,6 +301,8 @@
     .cat-Shopping { background: #60a5fa20; color: #60a5fa; }
     .cat-Entertainment { background: #a78bfa20; color: #a78bfa; }
     .cat-Travel { background: #fbbf2420; color: #fbbf24; }
+    .cat-Wellness { background: #f472b620; color: #f472b6; }
+    .cat-Others { background: #94a3b820; color: #94a3b8; }
 
     .summary-row td {
       font-weight: 700;
@@ -374,11 +378,17 @@
           <option>Shopping</option>
           <option>Entertainment</option>
           <option>Travel</option>
+          <option>Wellness</option>
+          <option>Others</option>
         </select>
       </div>
       <div class="form-field">
         <label>Amount (SGD)</label>
         <input type="number" id="expAmount" placeholder="0.00" step="0.01" min="0" />
+      </div>
+      <div class="form-field wide">
+        <label>Notes (optional)</label>
+        <input type="text" id="expNotes" placeholder="e.g. team lunch" />
       </div>
       <button class="btn-primary" onclick="addExpense()">+ Add</button>
     </div>
@@ -405,6 +415,14 @@
     <div class="stat-card">
       <div class="label">Travel</div>
       <div class="value" id="statTravel" style="color:var(--yellow)">$0.00</div>
+    </div>
+    <div class="stat-card">
+      <div class="label">Wellness</div>
+      <div class="value" id="statWellness" style="color:var(--pink)">$0.00</div>
+    </div>
+    <div class="stat-card">
+      <div class="label">Others</div>
+      <div class="value" id="statOthers" style="color:var(--gray)">$0.00</div>
     </div>
   </div>
 
@@ -437,12 +455,14 @@
 <script>
   // ── State ────────────────────────────────────────────────────────────────
   let allRows = []; // each row: [date, item, category, amount]
-  const CATEGORIES = ['Food', 'Shopping', 'Entertainment', 'Travel'];
+  const CATEGORIES = ['Food', 'Shopping', 'Entertainment', 'Travel', 'Wellness', 'Others'];
   const CAT_COLORS = {
     Food: '#34d399',
     Shopping: '#60a5fa',
     Entertainment: '#a78bfa',
     Travel: '#fbbf24',
+    Wellness: '#f472b6',
+    Others: '#94a3b8',
   };
 
   // ── Init ─────────────────────────────────────────────────────────────────
@@ -495,6 +515,7 @@
     const item = document.getElementById('expItem').value.trim();
     const category = document.getElementById('expCategory').value;
     const amount = parseFloat(document.getElementById('expAmount').value);
+    const notes = document.getElementById('expNotes').value.trim();
 
     if (!date || !item || isNaN(amount) || amount <= 0) {
       showToast('Please fill in all fields correctly');
@@ -505,11 +526,12 @@
       const res = await fetch('/add-expense', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ date, item, category, amount }),
+        body: JSON.stringify({ date, item, category, amount, notes }),
       });
       if (!res.ok) throw new Error((await res.json()).error);
       document.getElementById('expItem').value = '';
       document.getElementById('expAmount').value = '';
+      document.getElementById('expNotes').value = '';
       showToast('✅ Expense added');
     } catch (e) {
       showToast('Error: ' + e.message);
@@ -548,8 +570,9 @@
   }
 
   function renderStats(rows) {
-    const totals = { Food: 0, Shopping: 0, Entertainment: 0, Travel: 0 };
-    rows.forEach(r => { totals[r[2]] = (totals[r[2]] || 0) + parseFloat(r[3] || 0); });
+    const totals = {};
+    CATEGORIES.forEach(c => { totals[c] = 0; });
+    rows.forEach(r => { if (totals[r[2]] !== undefined) totals[r[2]] += parseFloat(r[3] || 0); });
     const grand = Object.values(totals).reduce((a, b) => a + b, 0);
     document.getElementById('statTotal').textContent = '$' + grand.toFixed(2);
     CATEGORIES.forEach(c => {
@@ -573,17 +596,18 @@
 
     let html = `<table>
       <thead><tr>
-        <th>Date</th><th>Item</th><th>Category</th><th>Amount (SGD)</th><th></th>
+        <th>Date</th><th>Item</th><th>Category</th><th>Amount (SGD)</th><th>Notes</th><th></th>
       </tr></thead><tbody>`;
 
     rows.forEach(row => {
       const globalIdx = allRows.indexOf(row);
-      const [date, item, cat, amt] = row;
+      const [date, item, cat, amt, notes = ''] = row;
       html += `<tr>
         <td>${date}</td>
         <td>${escHtml(item)}</td>
         <td><span class="cat-badge cat-${cat}">${cat}</span></td>
         <td>$${parseFloat(amt).toFixed(2)}</td>
+        <td style="color:var(--text-muted);font-size:0.85rem">${escHtml(notes)}</td>
         <td><button class="btn-danger" onclick="deleteExpense(${globalIdx})">Delete</button></td>
       </tr>`;
     });
@@ -592,6 +616,7 @@
       <tfoot><tr class="summary-row">
         <td colspan="3">Total</td>
         <td>$${total.toFixed(2)}</td>
+        <td></td>
         <td></td>
       </tr></tfoot>
     </table>`;
