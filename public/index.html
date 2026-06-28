@@ -498,6 +498,33 @@
       border-top: 2px solid var(--border);
     }
 
+    .expand-row td {
+      padding: 12px 20px;
+      background: var(--surface2);
+      border-top: 1px solid var(--border);
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      flex-wrap: wrap;
+    }
+
+    .expand-count {
+      font-size: 0.78rem;
+      color: var(--text-muted);
+      flex: 1;
+    }
+
+    .btn-expand {
+      background: transparent;
+      border: 1px solid var(--border);
+      color: var(--accent);
+      padding: 5px 14px;
+      font-size: 0.8rem;
+      border-radius: var(--radius-sm);
+    }
+
+    .btn-expand:hover { background: var(--accent); color: #fff; border-color: var(--accent); }
+
     .empty-msg {
       text-align: center;
       padding: 40px;
@@ -676,7 +703,7 @@
     <div class="table-header">
       <h3 id="tableHeading">Expenses</h3>
       <div class="table-controls">
-        <input type="text" class="table-search" id="tableSearch" placeholder="🔍 Search…" oninput="renderTable(filteredRows())" aria-label="Search expenses" />
+        <input type="text" class="table-search" id="tableSearch" placeholder="🔍 Search…" oninput="tableLimit=10;renderTable(filteredRows())" aria-label="Search expenses" />
         <button class="btn-export" onclick="exportCSV()">⬇ CSV</button>
       </div>
     </div>
@@ -789,6 +816,7 @@ let authToken = sessionStorage.getItem('authToken') || null;
 let editingIndex = null;
 let sortCol   = 0;
 let sortAsc   = false;
+let tableLimit = 10;
 
 const CATEGORIES = ['Food','Shopping','Entertainment','Travel','Wellness','Others'];
 const CAT_COLORS = {
@@ -1053,6 +1081,7 @@ function render() {
   document.getElementById('barTitle').textContent  = `Monthly Breakdown — ${year}`;
   document.getElementById('tableHeading').textContent = `${label} Expenses`;
 
+  tableLimit = 10;
   renderStats(monthRows);
   renderTable(filteredRows());
   renderPie(monthRows);
@@ -1088,9 +1117,12 @@ function renderTable(rows) {
     return 0;
   });
 
-  const total  = rows.reduce((s, r) => s + parseFloat(r[3] || 0), 0);
-  const arrows = ['↕','↕','↕','↕'].map((a, i) => i === sortCol ? (sortAsc ? '↑' : '↓') : a);
-  const cols   = ['Date','Item','Category','Amount'];
+  const total      = rows.reduce((s, r) => s + parseFloat(r[3] || 0), 0);
+  const arrows     = ['↕','↕','↕','↕'].map((a, i) => i === sortCol ? (sortAsc ? '↑' : '↓') : a);
+  const cols       = ['Date','Item','Category','Amount'];
+  const visible    = sorted.slice(0, tableLimit);
+  const remaining  = sorted.length - visible.length;
+  const colCount   = isReal ? 6 : 5;
 
   let html = `<table><thead><tr>`;
   cols.forEach((c, i) => {
@@ -1101,7 +1133,7 @@ function renderTable(rows) {
   if (isReal) html += `<th></th>`;
   html += `</tr></thead><tbody>`;
 
-  sorted.forEach(row => {
+  visible.forEach(row => {
     const globalIdx = allRows.indexOf(row);
     const [date, item, cat, amt, notes = ''] = row;
     html += `<tr>
@@ -1111,24 +1143,40 @@ function renderTable(rows) {
       <td>$${parseFloat(amt).toFixed(2)}</td>
       <td style="color:var(--text-muted);font-size:0.85rem">${escHtml(notes)}</td>`;
     if (isReal) {
-      html += `<td>
-        <div style="display:flex;gap:6px;">
-          <button class="btn-edit" onclick="startEdit(${globalIdx})" aria-label="Edit ${escHtml(item)}">✏</button>
-          <button class="btn-danger" onclick="promptDelete(this,${globalIdx})" aria-label="Delete ${escHtml(item)}">Delete</button>
-        </div></td>`;
+      html += `<td><div style="display:flex;gap:6px;">
+        <button class="btn-edit" onclick="startEdit(${globalIdx})" aria-label="Edit ${escHtml(item)}">✏</button>
+        <button class="btn-danger" onclick="promptDelete(this,${globalIdx})" aria-label="Delete ${escHtml(item)}">Delete</button>
+      </div></td>`;
     }
     html += `</tr>`;
   });
 
-  const colspan = isReal ? 3 : 3;
+  // Expand / collapse row
+  if (remaining > 0) {
+    html += `<tr class="expand-row"><td colspan="${colCount}">
+      <span class="expand-count">Showing ${visible.length} of ${sorted.length}</span>
+      <button class="btn-expand" onclick="showMore()">Show ${Math.min(10, remaining)} more</button>
+      <button class="btn-expand" onclick="showAll()">Show all</button>
+    </td></tr>`;
+  } else if (sorted.length > 10) {
+    html += `<tr class="expand-row"><td colspan="${colCount}">
+      <span class="expand-count">All ${sorted.length} expenses shown</span>
+      <button class="btn-expand" onclick="collapseTable()">Collapse</button>
+    </td></tr>`;
+  }
+
   html += `</tbody><tfoot><tr class="summary-row">
-    <td colspan="${colspan}">Total</td>
+    <td colspan="3">Total</td>
     <td>$${total.toFixed(2)}</td>
     <td></td>${isReal ? '<td></td>' : ''}
   </tr></tfoot></table>`;
 
   wrap.innerHTML = html;
 }
+
+function showMore()      { tableLimit += 10;            renderTable(filteredRows()); }
+function showAll()       { tableLimit = Infinity;        renderTable(filteredRows()); }
+function collapseTable() { tableLimit = 10;              renderTable(filteredRows()); }
 
 function setSort(col) {
   if (sortCol === col) sortAsc = !sortAsc;
