@@ -5,6 +5,7 @@ const { google } = require('googleapis');
 const TelegramBot = require('node-telegram-bot-api');
 const path = require('path');
 const fs = require('fs');
+const crypto = require('crypto');
 
 const app = express();
 app.use(express.json());
@@ -14,6 +15,22 @@ const PORT = process.env.PORT || 3000;
 const SHEET_ID = process.env.GOOGLE_SHEET_ID;
 const SHEET_NAME = 'Expenses';
 const CATEGORIES = ['Food', 'Shopping', 'Entertainment', 'Travel', 'Wellness', 'Others'];
+
+// ── Auth ─────────────────────────────────────────────────────────────────────
+const TOKEN_SECRET = process.env.TOKEN_SECRET || 'expense-tracker-default-secret';
+
+function generateToken() {
+  return crypto.createHmac('sha256', TOKEN_SECRET)
+    .update(process.env.ADMIN_PASSWORD || '')
+    .digest('hex');
+}
+
+function isAuthorized(req) {
+  if (!process.env.ADMIN_PASSWORD) return false;
+  const fromHeader = (req.headers['authorization'] || '').replace('Bearer ', '');
+  const fromQuery = (req.query && req.query.token) || '';
+  return (fromHeader || fromQuery) === generateToken();
+}
 
 // ── Google Sheets auth ──────────────────────────────────────────────────────
 function getAuthClient() {
@@ -88,6 +105,7 @@ setInterval(async () => {
 }, 10000);
 
 app.get('/stream', (req, res) => {
+  if (!isAuthorized(req)) return res.status(401).json({ error: 'Unauthorized' });
   res.set({
     'Content-Type': 'text/event-stream',
     'Cache-Control': 'no-cache',
@@ -102,7 +120,19 @@ app.get('/stream', (req, res) => {
 });
 
 // ── REST endpoints ───────────────────────────────────────────────────────────
+app.post('/auth', (req, res) => {
+  if (!process.env.ADMIN_PASSWORD) {
+    return res.status(503).json({ error: 'Auth not configured on server' });
+  }
+  const { password } = req.body;
+  if (!password || password !== process.env.ADMIN_PASSWORD) {
+    return res.status(401).json({ error: 'Incorrect password' });
+  }
+  res.json({ token: generateToken() });
+});
+
 app.get('/expenses', async (req, res) => {
+  if (!isAuthorized(req)) return res.status(401).json({ error: 'Unauthorized' });
   try {
     const rows = await getAllRows();
     res.json(rows);
@@ -112,6 +142,7 @@ app.get('/expenses', async (req, res) => {
 });
 
 app.post('/add-expense', async (req, res) => {
+  if (!isAuthorized(req)) return res.status(401).json({ error: 'Unauthorized' });
   const { date, item, category, amount, notes } = req.body;
   if (!date || !item || !category || amount === undefined) {
     return res.status(400).json({ error: 'Missing fields' });
@@ -135,7 +166,34 @@ app.post('/add-expense', async (req, res) => {
   }
 });
 
+app.put('/update-expense', async (req, res) => {
+  if (!isAuthorized(req)) return res.status(401).json({ error: 'Unauthorized' });
+  const { rowIndex, date, item, category, amount, notes } = req.body;
+  if (rowIndex === undefined || !date || !item || !category || amount === undefined) {
+    return res.status(400).json({ error: 'Missing fields' });
+  }
+  if (!CATEGORIES.includes(category)) {
+    return res.status(400).json({ error: 'Invalid category' });
+  }
+  try {
+    const sheets = await getSheetsClient();
+    const rowNum = rowIndex + 2; // row 1 is header; rowIndex is 0-based
+    await sheets.spreadsheets.values.update({
+      spreadsheetId: SHEET_ID,
+      range: `${SHEET_NAME}!A${rowNum}:E${rowNum}`,
+      valueInputOption: 'USER_ENTERED',
+      requestBody: { values: [[date, item, category, parseFloat(amount), notes || '']] },
+    });
+    const rows = await getAllRows();
+    broadcastSSE(rows);
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 app.delete('/delete-expense', async (req, res) => {
+  if (!isAuthorized(req)) return res.status(401).json({ error: 'Unauthorized' });
   const { rowIndex } = req.body; // 0-based index into data rows (row 2 onwards in sheet)
   if (rowIndex === undefined) {
     return res.status(400).json({ error: 'Missing rowIndex' });
